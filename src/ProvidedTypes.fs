@@ -295,19 +295,6 @@ module Utils =
     let canBindNestedType (bindingFlags: BindingFlags) (c: Type) =
             hasFlag bindingFlags BindingFlags.Public && c.IsNestedPublic || hasFlag bindingFlags BindingFlags.NonPublic && not c.IsNestedPublic
 
-    // We only want to return source types "typeof<Void>" values as _target_ types in one very specific location due to a limitation in the
-    // F# compiler code for multi-targeting.
-    let ImportProvidedMethodBaseAsILMethodRef_OnStack_HACK() = 
-        let rec loop i = 
-            if i > 9 then 
-                false 
-            else
-                let frame = StackFrame(i, true)
-                match frame.GetMethod() with
-                | null -> loop (i+1)
-                | m -> m.Name = "ImportProvidedMethodBaseAsILMethodRef" || loop (i+1)
-        loop 1
-
 //--------------------------------------------------------------------------------
 // UncheckedQuotations
 
@@ -1056,7 +1043,6 @@ and ProvidedMethod(isTgt: bool, methodName: string, attrs: MethodAttributes, par
     let mutable staticParams = staticParams
     let mutable staticParamsApply = staticParamsApply
     let customAttributesImpl = CustomAttributesImpl(isTgt, customAttributesData)
-    let mutable returnTypeFixCache = None
 
     /// The public constructor for the design-time/source model
     new (methodName, parameters, returnType, ?invokeCode, ?isStatic) =
@@ -1125,23 +1111,7 @@ and ProvidedMethod(isTgt: bool, methodName: string, attrs: MethodAttributes, par
         let cc = if not x.IsStatic then cc ||| CallingConventions.HasThis else cc
         cc
 
-    override __.ReturnType = 
-        if isTgt then 
-            match returnTypeFixCache with 
-            | Some returnTypeFix -> returnTypeFix
-            | None -> 
-                let returnTypeFix = 
-                    match returnType.Namespace, returnType.Name with 
-                    | "System", "Void"->  
-                        if ImportProvidedMethodBaseAsILMethodRef_OnStack_HACK() then 
-                            typeof<Void>
-                        else 
-                            returnType
-                    | _ -> returnType
-                returnTypeFixCache <- Some returnTypeFix
-                returnTypeFix
-        else
-            returnType
+    override __.ReturnType = returnType
 
     override __.ReturnParameter = null // REVIEW: Give it a name and type?
 
@@ -7689,7 +7659,6 @@ namespace ProviderImplementation.ProvidedTypes
         and txILMethodDef (declTy: Type) (inp: ILMethodDef) =
             let gps = if declTy.IsGenericType then declTy.GetGenericArguments() else [| |]
             let rec gps2 = inp.GenericParams |> Array.mapi (fun i gp -> txILGenericParam (fun () -> gps, gps2) (i + gps.Length) gp)
-            let mutable returnTypeFixCache = None
             { new MethodInfo() with
 
                 override __.Name = inp.Name
@@ -7699,22 +7668,7 @@ namespace ProviderImplementation.ProvidedTypes
                 override __.GetParameters() = inp.Parameters |> Array.map (txILParameter (gps, gps2))
                 override __.CallingConvention = if inp.IsStatic then CallingConventions.Standard else CallingConventions.HasThis ||| CallingConventions.Standard
 
-                override __.ReturnType = 
-                    match returnTypeFixCache with 
-                    | None -> 
-                        let returnType = inp.Return.Type |> txILType (gps, gps2)
-                        let returnTypeFix =
-                            match returnType.Namespace, returnType.Name with 
-                            | "System", "Void"->  
-                                if ImportProvidedMethodBaseAsILMethodRef_OnStack_HACK() then 
-                                    typeof<Void>
-                                else 
-                                    returnType
-                            | t -> returnType
-                        returnTypeFixCache <- Some returnTypeFix
-                        returnTypeFix
-                    | Some returnTypeFix ->
-                        returnTypeFix
+                override __.ReturnType = inp.Return.Type |> txILType (gps, gps2)
 
                 override __.GetCustomAttributesData() = inp.CustomAttrs |> txCustomAttributesData
                 override __.GetGenericArguments() = gps2 
