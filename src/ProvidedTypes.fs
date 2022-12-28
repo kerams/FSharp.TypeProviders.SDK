@@ -8399,6 +8399,7 @@ namespace ProviderImplementation.ProvidedTypes
                 let hasProvidedArguments =
                     genericArguments
                     |> List.exists (function 
+                        | :? TypeSymbol
                         | :? ProvidedTypeDefinition
                         | :? ProvidedTypeSymbol -> true
                         | _ -> false )
